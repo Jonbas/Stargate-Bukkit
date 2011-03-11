@@ -661,6 +661,7 @@ public class Portal {
             BufferedWriter bw = new BufferedWriter(new FileWriter(loc, false));
 
             for (Portal portal : allPortals) {
+            	
             	String wName = portal.world.getName();
             	if (!wName.equalsIgnoreCase(world.getName())) continue;
                 StringBuilder builder = new StringBuilder();
@@ -789,6 +790,8 @@ public class Portal {
                 		OpenCount++;
                 	}
                 }
+               
+                saveAllGates(world);
                 Stargate.log.info("[Stargate] {" + world.getName() + "} Loaded " + portalCount + " stargates with " + OpenCount + " set as always-on");
             } catch (Exception e) {
                 Stargate.log.log(Level.SEVERE, "Exception while reading stargates from " + db.getName() + ": " + l);
