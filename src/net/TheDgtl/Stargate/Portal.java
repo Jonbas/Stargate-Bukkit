@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Scanner;
 import java.util.logging.Level;
 
@@ -297,6 +298,14 @@ public class Portal {
     public String getDestinationName() {
         return destination;
     }
+    
+    public boolean isChunkLoaded() {
+    	return topLeft.getWorld().isChunkLoaded(topLeft.getBlock().getChunk());
+    }
+    
+    public void loadChunk() {
+    	topLeft.getWorld().loadChunk(topLeft.getBlock().getChunk());
+    }
 
     public boolean isVerified() {
         for (RelativeBlockVector control : gate.getControls())
@@ -320,7 +329,7 @@ public class Portal {
         return owner;
     }
 
-    public void activate(Player player, Stargate stargate) {
+    public void activate(Player player) {
         destinations.clear();
         destination = "";
         drawSign();
@@ -331,7 +340,7 @@ public class Portal {
             // Not fixed, not this portal, and visible to this player.
             if (	(!portal.isFixed()) &&
             		(!dest.equalsIgnoreCase(getName())) && 							// Not this portal
-            		(!portal.isHidden() || stargate.hasPerm(player, "stargate.hidden", player.isOp()) || portal.getOwner().equals(player.getName()))
+            		(!portal.isHidden() || Stargate.hasPerm(player, "stargate.hidden", player.isOp()) || portal.getOwner().equals(player.getName()))
             	) {
                 destinations.add(portal.getName());
             }
@@ -365,9 +374,9 @@ public class Portal {
     	return openTime;
     }
 
-    public void cycleDestination(Player player, Stargate stargate) {
+    public void cycleDestination(Player player) {
         if (!isActive() || getActivePlayer() != player) {
-            activate(player, stargate);
+            activate(player);
         }
 
         if (destinations.size() > 0) {
@@ -454,7 +463,7 @@ public class Portal {
         return frame;
     }
 
-    public void unregister() {
+    public void unregister(boolean removeAll) {
     	Stargate.log.info("[Stargate] Unregistering gate " + getName());
     	close(true);
         lookupNamesNet.get(getNetwork().toLowerCase()).remove(getName().toLowerCase());
@@ -472,7 +481,9 @@ public class Portal {
             lookupEntrances.remove(entrance);
         }
 
-        allPortals.remove(this);
+        if (removeAll)
+        	allPortals.remove(this);
+        
         allPortalsNet.get(getNetwork().toLowerCase()).remove(getName().toLowerCase());
 
         if (id.getBlock().getType() == Material.WALL_SIGN) {
@@ -536,6 +547,13 @@ public class Portal {
         boolean hidden = (options.indexOf('h') != -1 || options.indexOf('H') != -1);
         boolean alwaysOn = (options.indexOf('a') != -1 || options.indexOf('A') != -1);
         boolean priv = (options.indexOf('p') != -1 || options.indexOf('P') != -1);
+        
+        // Check if the user can only create personal gates, set network if so
+        if (Stargate.hasPerm(player, "stargate.create.personal", false) && 
+        	!Stargate.hasPerm(player, "stargate.create", player.isOp()) ) {
+        	network = player.getName();
+        	if (network.length() > 11) network = network.substring(0, 11);
+        }
         
         // Can not create a non-fixed always-on gate.
         if (alwaysOn && destName.length() == 0) {
@@ -768,24 +786,30 @@ public class Portal {
 
                     Portal portal = new Portal(topLeft, modX, modZ, rotX, sign, button, dest, name, false, network, gate, owner, hidden, alwaysOn, priv);
                     portal.close(true);
-                    // Verify portal integrity/register portal
-                    if (!portal.isVerified() || !portal.checkIntegrity()) {
-                            portal.unregister();
-                            Stargate.log.info("[Stargate] Destroying stargate at " + portal.toString());
-                    } else {
-                    	portal.drawSign();
-                    	portalCount++;
-                    }
-
                 }
                 scanner.close();
                 
                 // Open any always-on gates. Do this here as it should be more efficient than in the loop.
                 int OpenCount = 0;
-                for (Portal portal : allPortals) {
+                //for (Portal portal : allPortals) {
+                for (Iterator<Portal> iter = allPortals.iterator(); iter.hasNext(); ) {
+                	Portal portal = iter.next();
                 	if (portal == null) continue;
+
+                    // Verify portal integrity/register portal
+                	if (!portal.wasVerified()) {
+	                    if (!portal.isVerified() || !portal.checkIntegrity()) {
+	                        portal.unregister(false);
+	                        iter.remove();
+	                        Stargate.log.info("[Stargate] Destroying stargate at " + portal.toString());
+	                        continue;
+	                    } else {
+	                    	portal.drawSign();
+	                    	portalCount++;
+	                    }
+                	}
+
                 	if (!portal.isAlwaysOn()) continue;
-					if (!portal.wasVerified()) continue;
                 	
                 	Portal dest = portal.getDestination();
                 	if (dest != null) {

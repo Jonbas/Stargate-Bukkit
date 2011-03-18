@@ -24,6 +24,8 @@ import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockRightClickEvent;
 import org.bukkit.event.block.SignChangeEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.entity.EntityListener;
 import org.bukkit.event.player.PlayerListener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.server.PluginEvent;
@@ -51,13 +53,14 @@ import com.nijikokun.bukkit.Permissions.Permissions;
  */
 public class Stargate extends JavaPlugin {
 	// Permissions
-	private Permissions permissions = null;
+	private static Permissions permissions = null;
 	private double permVersion = 0;
 	
-    private final bListener blockListener = new bListener(this);
+    private final bListener blockListener = new bListener();
     private final pListener playerListener = new pListener();
     private final vListener vehicleListener = new vListener();
     private final wListener worldListener = new wListener();
+    private final eListener entityListener = new eListener();
     public static Logger log;
     private Configuration config;
     private PluginManager pm;
@@ -71,6 +74,7 @@ public class Stargate extends JavaPlugin {
     private static String invMsg = "Invalid Destination"; 
     private static String blockMsg = "Destination Blocked";
     private static String defNetwork = "central";
+    private static boolean destroyExplosion = false;
     private static int activeLimit = 10;
     private static int openLimit = 10;
     
@@ -124,6 +128,8 @@ public class Stargate extends JavaPlugin {
     	
     	pm.registerEvent(Event.Type.WORLD_LOADED, worldListener, Priority.Normal, this);
     	
+    	pm.registerEvent(Event.Type.ENTITY_EXPLODE, entityListener, Priority.Normal, this);
+    	
     	getServer().getScheduler().scheduleSyncRepeatingTask(this, new SGThread(), 0L, 100L);
     }
 
@@ -138,13 +144,12 @@ public class Stargate extends JavaPlugin {
         invMsg = config.getString("not-selected-message", invMsg);
         blockMsg = config.getString("other-side-blocked-message", blockMsg);
         defNetwork = config.getString("default-gate-network", defNetwork).trim();
-        
     	Economy.useEconomy = config.getBoolean("economy.use-iconomy", Economy.useEconomy);
     	Economy.createCharge = config.getDouble( "economy.creation-cost", Economy.createCharge);
     	Economy.destroyRefund = config.getDouble("economy.destroy-refund", Economy.destroyRefund);
     	Economy.useCharge = config.getDouble("economy.use-cost", Economy.useCharge);
     	
-        System.out.println("useCharge = " + Economy.useCharge);
+        destroyExplosion = config.getBoolean("destroyexplosion", destroyExplosion);
         saveConfig();
     }
 	
@@ -158,19 +163,18 @@ public class Stargate extends JavaPlugin {
         config.setProperty("not-selected-message", invMsg);
         config.setProperty("other-side-blocked-message", blockMsg);
         config.setProperty("default-gate-network", defNetwork);
-        
         config.setProperty("economy.use-iconomy", Economy.useEconomy);
         config.setProperty("economy.creation-cost", Economy.createCharge);
         config.setProperty("economy.destroy-refund", Economy.destroyRefund);
         config.setProperty("economy.use-cost", Economy.useCharge);
-        
+        config.setProperty("destroyexplosion", destroyExplosion);
         config.save();
 	}
 	
 	public void reloadGates() {
 		Gate.loadGates(gateFolder);
 		// Replace nethergate.gate if it doesn't have an exit point.
-		if (Gate.getGateByName("nethergate.gate").getExit() == null) {
+		if (Gate.getGateByName("nethergate.gate") == null || Gate.getGateByName("nethergate.gate").getExit() == null) {
 			Gate.populateDefaults(gateFolder);
 		}
 		
@@ -187,6 +191,7 @@ public class Stargate extends JavaPlugin {
 		}
 		File newFile = new File(portalFolder, getServer().getWorlds().get(0).getName() + ".db");
 		if (!newFile.exists()) {
+			newFile.getParentFile().mkdirs();
 	        // Migrate not-so-old stargate db
 	        File oldishFile = new File("plugins/Stargate/stargate.db");
 	        if (oldishFile.exists()) {
@@ -272,7 +277,7 @@ public class Stargate extends JavaPlugin {
 	/*
 	 * Check whether the player has the given permissions.
 	 */
-	public boolean hasPerm(Player player, String perm, boolean def) {
+	public static boolean hasPerm(Player player, String perm, boolean def) {
 		if (permissions != null) {
 			return permissions.getHandler().has(player, perm);
 		} else {
@@ -337,12 +342,6 @@ public class Stargate extends JavaPlugin {
     }
 
     private class bListener extends BlockListener {
-    	Stargate stargate;
-    	
-    	bListener(Stargate stargate) {
-    		this.stargate = stargate;
-    	}
-    	
     	@Override
     	public void onBlockPlace(BlockPlaceEvent event) {
     		// Stop player from placing a block touching a portals controls
@@ -360,7 +359,8 @@ public class Stargate extends JavaPlugin {
     		if (block.getType() != Material.WALL_SIGN) return;
     		
     		// Initialize a stargate
-            if (hasPerm(player, "stargate.create", player.isOp())) {
+            if (hasPerm(player, "stargate.create", player.isOp()) ||
+            	hasPerm(player, "stargate.create.personal", false)) {
 	            SignPost sign = new SignPost(new Blox(block));
 	            // Set sign text so we can create a gate with it.
 	            sign.setText(0, event.getLine(0));
@@ -393,7 +393,7 @@ public class Stargate extends JavaPlugin {
                 if (portal != null) {
                 	if (hasPerm(player, "stargate.use", true)) {
 	                    if ((!portal.isOpen()) && (!portal.isFixed())) {
-	                        portal.cycleDestination(player, stargate);
+	                        portal.cycleDestination(player);
 	                    }
                 	} else {
                 		if (!denyMsg.isEmpty()) {
@@ -440,18 +440,24 @@ public class Stargate extends JavaPlugin {
             Portal portal = Portal.getByBlock(block);
             if (portal == null) return;
             
-            if (!hasPerm(player, "stargate.destroy", player.isOp())) {
-            	event.setCancelled(true);
-            	return;
+            if (hasPerm(player, "stargate.destroy", player.isOp()) || hasPerm(player, "stargate.destroy.all", player.isOp()) ||
+               ( portal.getOwner().equalsIgnoreCase(player.getName()) && hasPerm(player, "stargate.destroy.owner", false) )) {
+	            portal.unregister(true);
+	            if (!dmgMsg.isEmpty()) {
+	                player.sendMessage(ChatColor.RED + dmgMsg);
+	            }
+	            return;
             }
-
+            
             //TODO add refund to owner here
             
             
-            portal.unregister();
+            portal.unregister(true);
             if (!dmgMsg.isEmpty()) {
                 player.sendMessage(ChatColor.RED + dmgMsg);
             }
+            
+            event.setCancelled(true);
         }
 
         @Override
@@ -479,6 +485,24 @@ public class Stargate extends JavaPlugin {
     		// We have to make sure the world is actually loaded. This gets called twice for some reason.
     		if (w.getBlockAt(w.getSpawnLocation()).getWorld() != null) {
     			Portal.loadAllGates(w);
+    		}
+    	}
+    }
+    
+    private class eListener extends EntityListener {
+    	@Override
+    	public void onEntityExplode(EntityExplodeEvent event) {
+    		if (event.isCancelled()) return;
+    		for (Block b : event.blockList()) {
+    			if (b.getTypeId() != Material.WALL_SIGN.getId() && b.getTypeId() != Material.STONE_BUTTON.getId()) continue;
+    			Portal portal = Portal.getByBlock(b);
+    			if (portal == null) continue;
+    			if (destroyExplosion) {
+    				portal.unregister(true);
+    			} else {
+    				b.setType(b.getType());
+    				event.setCancelled(true);
+    			}
     		}
     	}
     }
