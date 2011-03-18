@@ -605,6 +605,9 @@ public class Portal {
         if ((gate == null) || (buttonVector == null)) {
             return null;
         }
+        
+        //TODO add gate charge here
+        //if fails because of money, return null
 
         Portal portal = null;
 

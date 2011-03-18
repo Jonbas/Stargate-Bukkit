@@ -2,6 +2,7 @@ package net.TheDgtl.Stargate;
 
 import java.io.File;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.logging.Logger;
 
@@ -25,6 +26,8 @@ import org.bukkit.event.block.BlockRightClickEvent;
 import org.bukkit.event.block.SignChangeEvent;
 import org.bukkit.event.player.PlayerListener;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.server.PluginEvent;
+import org.bukkit.event.server.ServerListener;
 import org.bukkit.event.vehicle.VehicleListener;
 import org.bukkit.event.vehicle.VehicleMoveEvent;
 import org.bukkit.event.world.WorldEvent;
@@ -34,8 +37,11 @@ import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.config.Configuration;
+import org.bukkit.util.config.ConfigurationNode;
 
 // Permissions
+import com.nijiko.coelho.iConomy.iConomy;
+import com.nijiko.permissions.PermissionHandler;
 import com.nijikokun.bukkit.Permissions.Permissions;
 
 /**
@@ -104,6 +110,9 @@ public class Stargate extends JavaPlugin {
     			log.info("[Stargate] Using Permissions " + permVersion + " (" + Permissions.version + ") for permissions");
     	}
     	
+    	//TODO tie into iConomy
+    	
+    	
     	pm.registerEvent(Event.Type.PLAYER_MOVE, playerListener, Priority.Normal, this);
     	
     	pm.registerEvent(Event.Type.BLOCK_RIGHTCLICKED, blockListener, Priority.Normal, this);
@@ -129,6 +138,13 @@ public class Stargate extends JavaPlugin {
         invMsg = config.getString("not-selected-message", invMsg);
         blockMsg = config.getString("other-side-blocked-message", blockMsg);
         defNetwork = config.getString("default-gate-network", defNetwork).trim();
+        
+    	Economy.useEconomy = config.getBoolean("economy.use-iconomy", Economy.useEconomy);
+    	Economy.createCharge = config.getDouble( "economy.creation-cost", Economy.createCharge);
+    	Economy.destroyRefund = config.getDouble("economy.destroy-refund", Economy.destroyRefund);
+    	Economy.useCharge = config.getDouble("economy.use-cost", Economy.useCharge);
+    	
+        System.out.println("useCharge = " + Economy.useCharge);
         saveConfig();
     }
 	
@@ -142,6 +158,12 @@ public class Stargate extends JavaPlugin {
         config.setProperty("not-selected-message", invMsg);
         config.setProperty("other-side-blocked-message", blockMsg);
         config.setProperty("default-gate-network", defNetwork);
+        
+        config.setProperty("economy.use-iconomy", Economy.useEconomy);
+        config.setProperty("economy.creation-cost", Economy.createCharge);
+        config.setProperty("economy.destroy-refund", Economy.destroyRefund);
+        config.setProperty("economy.use-cost", Economy.useCharge);
+        
         config.save();
 	}
 	
@@ -297,6 +319,7 @@ public class Stargate extends JavaPlugin {
                     Portal destination = portal.getDestination();
 
                     if (destination != null) {
+                    	//TODO Charge for portal usage here
                         if (!teleMsg.isEmpty()) {
                             player.sendMessage(ChatColor.BLUE + teleMsg);
                         }
@@ -422,6 +445,9 @@ public class Stargate extends JavaPlugin {
             	return;
             }
 
+            //TODO add refund to owner here
+            
+            
             portal.unregister();
             if (!dmgMsg.isEmpty()) {
                 player.sendMessage(ChatColor.RED + dmgMsg);
@@ -478,4 +504,36 @@ public class Stargate extends JavaPlugin {
 	    	}
 	    }
     }
+    
+    //TODO finish up this plugin Listener
+    
+    private class plugListener extends ServerListener {
+    	private final Stargate plugin;
+
+    	public plugListener(Stargate instance) { 
+    		plugin = instance;
+    	}
+
+        @Override
+        public void onPluginEnabled(PluginEvent event) {
+            if(event.getPlugin().getDescription().getName().equals("iConomy")) {
+                System.out.println("LocalShops: Attached to iConomy.");
+                Economy.iConomy = (iConomy)event.getPlugin();
+                Economy.useEconomy = true;
+        		Economy.currencyName = iConomy.getBank().getCurrency();
+            }
+            
+        }
+        
+        @Override
+        public void onPluginDisabled(PluginEvent event) {
+        	if(event.getPlugin().getDescription().getName().equals("iConomy")) {
+                Economy.iConomy = null;
+                Economy.useEconomy = true;
+                System.out.println("LocalShops: Lost connection to iConomy.");
+        	}
+        }
+    }
+    
+    
 }
