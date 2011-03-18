@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.Scanner;
 import java.util.logging.Level;
 
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -624,8 +625,12 @@ public class Portal {
             return null;
         }
         
-        //TODO add gate charge here
-        //if fails because of money, return null
+        if(Economy.useEconomy) {
+        	if(!Economy.chargePlayer(player.getName(), Economy.createCharge)) {
+        		player.sendMessage(ChatColor.RED + Economy.probCreditMsg);
+        		return null;
+        	}
+        }
 
         Portal portal = null;
 

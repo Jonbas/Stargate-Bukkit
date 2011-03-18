@@ -8,6 +8,8 @@ public class Economy {
 	public static String currencyName = "Coins";
 	public static iConomy iConomy = null;
 	
+	public static String probCreditMsg = "Not enough coins";
+	
 	public static double useCharge = 0;
 	public static double createCharge = 0;
 	public static double destroyRefund = 0;

@@ -61,6 +61,7 @@ public class Stargate extends JavaPlugin {
     private final vListener vehicleListener = new vListener();
     private final wListener worldListener = new wListener();
     private final eListener entityListener = new eListener();
+    private final pluginListener pluginListener = new pluginListener(this);
     public static Logger log;
     private Configuration config;
     private PluginManager pm;
@@ -114,8 +115,23 @@ public class Stargate extends JavaPlugin {
     			log.info("[Stargate] Using Permissions " + permVersion + " (" + Permissions.version + ") for permissions");
     	}
     	
-    	//TODO tie into iConomy
+    	Plugin p = pm.getPlugin("iConomy");
+    	if( p != null ) {
+    		if(p.isEnabled()) {
+    			Economy.iConomy = (iConomy)p;
+    			Economy.useEconomy = true;
+    			log.info("[Stargate] Using iConomy (" + p.getDescription().getVersion() + ")");
+    		} else {
+    			Economy.iConomy = null;
+    			Economy.useEconomy = false;
+    		}
+    	} else {
+   			Economy.iConomy = null;
+			Economy.useEconomy = false;
+    	}
     	
+    	pm.registerEvent(Event.Type.PLUGIN_DISABLE, pluginListener, Priority.Monitor, this);
+    	pm.registerEvent(Event.Type.PLUGIN_ENABLE, pluginListener, Priority.Monitor, this);
     	
     	pm.registerEvent(Event.Type.PLAYER_MOVE, playerListener, Priority.Normal, this);
     	
@@ -148,6 +164,7 @@ public class Stargate extends JavaPlugin {
     	Economy.createCharge = config.getDouble( "economy.creation-cost", Economy.createCharge);
     	Economy.destroyRefund = config.getDouble("economy.destroy-refund", Economy.destroyRefund);
     	Economy.useCharge = config.getDouble("economy.use-cost", Economy.useCharge);
+    	Economy.probCreditMsg = config.getString("economy.not-enough-money-message", Economy.probCreditMsg);
     	
         destroyExplosion = config.getBoolean("destroyexplosion", destroyExplosion);
         saveConfig();
@@ -167,6 +184,7 @@ public class Stargate extends JavaPlugin {
         config.setProperty("economy.creation-cost", Economy.createCharge);
         config.setProperty("economy.destroy-refund", Economy.destroyRefund);
         config.setProperty("economy.use-cost", Economy.useCharge);
+        config.setProperty("economy.not-enough-money-message", Economy.probCreditMsg);
         config.setProperty("destroyexplosion", destroyExplosion);
         config.save();
 	}
@@ -222,8 +240,15 @@ public class Stargate extends JavaPlugin {
 
     private void onButtonPressed(Player player, Portal gate) {
         Portal destination = gate.getDestination();
+        
 
         if (!gate.isOpen()) {
+        	if(Economy.useEconomy) {
+        		if(Economy.getBalance(player.getName()) < Economy.useCharge ) {
+        			player.sendMessage(ChatColor.RED + Economy.probCreditMsg);
+        			return;
+        		}
+        	}
         	if ((!gate.isFixed()) && gate.isActive() &&  (gate.getActivePlayer() != player)) {
         		gate.deactivate();
                 if (!denyMsg.isEmpty()) {
@@ -324,12 +349,25 @@ public class Stargate extends JavaPlugin {
                     Portal destination = portal.getDestination();
 
                     if (destination != null) {
-                    	//TODO Charge for portal usage here
-                        if (!teleMsg.isEmpty()) {
-                            player.sendMessage(ChatColor.BLUE + teleMsg);
-                        }
-
-                        destination.teleport(player, portal, event);
+                    	
+                    	boolean teleportPlayer = true;
+                    	if( Economy.useEconomy ) {
+                    		if(!Economy.chargePlayer(player.getName(), Economy.useCharge)) {
+                    			teleportPlayer = false;
+                    		}
+                    	}
+                    	
+                    	if(teleportPlayer) {
+	                        if (!teleMsg.isEmpty()) {
+	                            player.sendMessage(ChatColor.BLUE + teleMsg);
+	                        }
+	
+	                        destination.teleport(player, portal, event);
+                    	} else {
+                    		if(!Economy.probCreditMsg.isEmpty()) {
+                    			player.sendMessage(ChatColor.RED + Economy.probCreditMsg);
+                    		}
+                    	}
                         portal.close(false);
                     }
                 } else {
@@ -367,6 +405,7 @@ public class Stargate extends JavaPlugin {
 	            sign.setText(1, event.getLine(1));
 	            sign.setText(2, event.getLine(2));
 	            sign.setText(3, event.getLine(3));
+
                 Portal portal = Portal.createPortal(sign, player);
                 if (portal == null) return;
                 
@@ -442,16 +481,19 @@ public class Stargate extends JavaPlugin {
             
             if (hasPerm(player, "stargate.destroy", player.isOp()) || hasPerm(player, "stargate.destroy.all", player.isOp()) ||
                ( portal.getOwner().equalsIgnoreCase(player.getName()) && hasPerm(player, "stargate.destroy.owner", false) )) {
-	            portal.unregister(true);
+                if(Economy.useEconomy) {
+                	Economy.creditPlayer(portal.getOwner(), Economy.destroyRefund);
+                }
+            	portal.unregister(true);
 	            if (!dmgMsg.isEmpty()) {
 	                player.sendMessage(ChatColor.RED + dmgMsg);
 	            }
 	            return;
             }
             
-            //TODO add refund to owner here
-            
-            
+            if(Economy.useEconomy) {
+            	Economy.creditPlayer(portal.getOwner(), Economy.destroyRefund);
+            } 
             portal.unregister(true);
             if (!dmgMsg.isEmpty()) {
                 player.sendMessage(ChatColor.RED + dmgMsg);
@@ -498,6 +540,9 @@ public class Stargate extends JavaPlugin {
     			Portal portal = Portal.getByBlock(b);
     			if (portal == null) continue;
     			if (destroyExplosion) {
+    	            if(Economy.useEconomy) {
+    	            	Economy.creditPlayer(portal.getOwner(), Economy.destroyRefund);
+    	            }
     				portal.unregister(true);
     			} else {
     				b.setType(b.getType());
@@ -529,12 +574,10 @@ public class Stargate extends JavaPlugin {
 	    }
     }
     
-    //TODO finish up this plugin Listener
-    
-    private class plugListener extends ServerListener {
+    private class pluginListener extends ServerListener {
     	private final Stargate plugin;
 
-    	public plugListener(Stargate instance) { 
+    	public pluginListener(Stargate instance) { 
     		plugin = instance;
     	}
 
@@ -545,6 +588,7 @@ public class Stargate extends JavaPlugin {
                 Economy.iConomy = (iConomy)event.getPlugin();
                 Economy.useEconomy = true;
         		Economy.currencyName = iConomy.getBank().getCurrency();
+        		log.info("[Stargate] Using iConomy (" + Economy.iConomy.getDescription().getVersion() + ")");
             }
             
         }
@@ -555,6 +599,7 @@ public class Stargate extends JavaPlugin {
                 Economy.iConomy = null;
                 Economy.useEconomy = true;
                 System.out.println("LocalShops: Lost connection to iConomy.");
+                log.info("[Stargate] Lost connection to iConomy.");
         	}
         }
     }
